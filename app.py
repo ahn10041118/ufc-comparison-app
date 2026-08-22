@@ -22,12 +22,31 @@ UFC 팬들 사이에서 "저 선수 진짜 세냐", "이번에 붙으면 누가 
 
 import pandas as pd
 import numpy as np
+import requests
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 from urllib.parse import quote
 
 st.set_page_config(page_title="UFC 선수 비교 분석기", page_icon="🥊", layout="wide")
+
+# 가벼운 디자인 폴리시: 카드 모서리를 둥글게, 그림자로 입체감, 아바타/사진을 원형으로
+st.markdown(
+    """
+    <style>
+    div[data-testid="stVerticalBlockBorderWrapper"] > div {
+        border-radius: 14px;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        box-shadow: 0 1px 4px rgba(11,11,11,0.08);
+        border-radius: 14px;
+    }
+    [data-testid="stMetricLabel"] { color: #52514e; }
+    .stTabs [data-baseweb="tab-list"] { gap: 4px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ------------------------------------------------------------
 # 색상 팔레트 (dataviz 스킬의 검증된 카테고리 팔레트 — 고정 슬롯 매핑)
@@ -158,6 +177,80 @@ def make_radar_chart(entries):
 
 
 # ------------------------------------------------------------
+# 선수 얼굴 사진 (Wikipedia에서 실시간 조회, 없으면 이니셜 아바타로 대체)
+# 2,740명 전원의 사진을 직접 수급/저장하는 건 이번 마감 안에는 무리라,
+# 위키백과 공개 API를 그때그때 조회해서 있으면 보여주는 방식으로 구현
+# ------------------------------------------------------------
+WIKI_TITLE_OVERRIDES = {
+    "Dooho Choi": "Doo Ho Choi",  # 데이터셋 표기(띄어쓰기 없음) -> 위키백과 표기
+}
+
+
+@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
+def get_fighter_photo_url(name):
+    title = WIKI_TITLE_OVERRIDES.get(name, name)
+    candidates = [title, f"{title} (fighter)", f"{title} (mixed martial artist)", f"{title} (martial artist)"]
+    headers = {"User-Agent": "PlayLabAcademy-UFC-App/1.0 (educational project)"}
+    for candidate in candidates:
+        try:
+            resp = requests.get(
+                f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(candidate)}",
+                headers=headers, timeout=3,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("type") == "disambiguation":
+                    continue
+                thumb = (data.get("thumbnail") or {}).get("source")
+                if thumb:
+                    return thumb
+        except Exception:
+            continue
+    return None
+
+
+def render_avatar(name, color, size=64):
+    """가능하면 위키백과 실제 사진, 없으면 이니셜 아바타를 원형으로 렌더링."""
+    photo_url = get_fighter_photo_url(name)
+    if photo_url:
+        return (
+            f'<img src="{photo_url}" style="width:{size}px;height:{size}px;'
+            f"border-radius:50%;object-fit:cover;border:3px solid {color};"
+            f'display:block;margin-bottom:6px;" />'
+        )
+    return avatar_html(name, color, size)
+
+
+# ------------------------------------------------------------
+# 스타일 자동 분류 — "감"이 아니라 데이터로 타격가형/그래플러형/올라운더형 구분
+# 그래플링 지표(테이크다운·컨트롤타임·서브미션 시도)와 타격 지표(유효타 정확도·빈도)를
+# 각각 전체 선수 대비 백분위로 평균 내서, 그 차이로 스타일을 판정
+# ------------------------------------------------------------
+STRIKE_KEYS = ["sig_str_accuracy", "sig_str_per_fight"]
+GRAPPLE_KEYS = ["td_accuracy", "ctrl_min_per_fight", "sub_att_per_fight"]
+
+
+def classify_style(name, metrics):
+    if name not in metrics.index:
+        return None
+    row = metrics.loc[name]
+    grapple_vals = [row.get(f"pct_{k}") for k in GRAPPLE_KEYS if pd.notna(row.get(f"pct_{k}"))]
+    strike_vals = [row.get(f"pct_{k}") for k in STRIKE_KEYS if pd.notna(row.get(f"pct_{k}"))]
+    if not grapple_vals or not strike_vals:
+        return None
+    g = sum(grapple_vals) / len(grapple_vals)
+    s = sum(strike_vals) / len(strike_vals)
+    diff = g - s
+    if diff >= 15:
+        label = "🥋 그래플러형"
+    elif diff <= -15:
+        label = "👊 타격가형"
+    else:
+        label = "⚖️ 올라운더형"
+    return {"label": label, "grapple_score": round(g, 1), "strike_score": round(s, 1)}
+
+
+# ------------------------------------------------------------
 # 데이터 로드
 # ------------------------------------------------------------
 @st.cache_data
@@ -176,9 +269,9 @@ all_fighters = sorted(set(fights["fighter_1"]).union(set(fights["fighter_2"])))
 metrics = build_fighter_metrics(fights, career)
 
 KOREAN_FIGHTERS = [
-    {"name": "Dong Hyun Kim", "kor": "김동현", "style": "그래플러 — 테이크다운·컨트롤타임 강세"},
-    {"name": "Chan Sung Jung", "kor": "정찬성 (코리안 좀비)", "style": "올라운더 — 타격·그래플링 균형형"},
-    {"name": "Dooho Choi", "kor": "최두호", "style": "타격가 — 유효타 정확도 강세"},
+    {"name": "Dong Hyun Kim", "kor": "김동현", "nickname": "스턴건"},
+    {"name": "Chan Sung Jung", "kor": "정찬성", "nickname": "코리안 좀비"},
+    {"name": "Dooho Choi", "kor": "최두호", "nickname": "코리안 슈퍼보이"},
 ]
 
 # ------------------------------------------------------------
@@ -239,7 +332,7 @@ if page == "🏠 소개":
 # ==============================================================
 elif page == "🥊 선수 비교":
     st.title("🥊 선수 비교")
-    st.caption("두 선수를 골라서 전적, 승리 방식, 타격·그래플링 스탯을 비교합니다.")
+    st.caption("두 선수를 골라서 전적, 스타일, 맞대결 기록을 비교합니다.")
 
     c1, c2 = st.columns(2)
     default_a = all_fighters.index("Islam Makhachev") if "Islam Makhachev" in all_fighters else 0
@@ -261,85 +354,98 @@ elif page == "🥊 선수 비교":
     a = fighter_record(fighter_a)
     b = fighter_record(fighter_b)
 
-    st.markdown("### 전적 비교")
-    col1, col2 = st.columns(2)
-    for col, s, avatar_color in [(col1, a, FIGHTER_COLORS[0]), (col2, b, FIGHTER_COLORS[1])]:
-        with col:
-            st.markdown(avatar_html(s["name"], avatar_color), unsafe_allow_html=True)
-            st.subheader(s["name"])
-            st.metric("전적 (승-패)", f"{s['wins']}승 {s['losses']}패")
-            st.metric("승률", f"{s['win_rate']:.1f}%")
+    tab1, tab2, tab3 = st.tabs(["📋 전적 · 스탯", "🕸️ 스타일 레이더", "🥊 맞대결 · 하이라이트"])
 
-            bio_row = bio[bio["FIGHTER"] == s["name"]]
-            if not bio_row.empty:
-                row = bio_row.iloc[0]
-                st.caption(
-                    f"신장 {row.get('HEIGHT', '정보없음')} · 리치 {row.get('REACH', '정보없음')} · "
-                    f"스탠스 {row.get('STANCE') if pd.notna(row.get('STANCE')) else '정보없음'}"
-                )
+    with tab1:
+        col1, col2 = st.columns(2)
+        for col, s, avatar_color in [(col1, a, FIGHTER_COLORS[0]), (col2, b, FIGHTER_COLORS[1])]:
+            with col:
+                with st.container(border=True):
+                    st.markdown(render_avatar(s["name"], avatar_color, size=72), unsafe_allow_html=True)
+                    st.subheader(s["name"])
 
-            career_row = career[career["FIGHTER"] == s["name"]]
-            if not career_row.empty:
-                cr = career_row.iloc[0]
-                st.metric("경기당 유효타", f"{cr['sig_str_per_fight']:.1f}개" if pd.notna(cr["sig_str_per_fight"]) else "정보없음")
-                m1, m2 = st.columns(2)
-                m1.metric("유효타 정확도", f"{cr['sig_str_accuracy']:.0f}%" if pd.notna(cr["sig_str_accuracy"]) else "-")
-                m2.metric("테이크다운 성공률", f"{cr['td_accuracy']:.0f}%" if pd.notna(cr["td_accuracy"]) else "-")
-            else:
-                st.caption("상세 경기 통계 데이터 없음")
+                    style = classify_style(s["name"], metrics)
+                    if style:
+                        st.markdown(f"**{style['label']}**")
+                        st.caption(f"그래플링 지수 {style['grapple_score']} · 타격 지수 {style['strike_score']} (전체 선수 백분위 평균)")
 
-    st.markdown("### 승리 방식 비교 (KO/TKO · Submission · Decision)")
-    compare_df = pd.DataFrame({
-        fighter_a: a["win_methods"],
-        fighter_b: b["win_methods"],
-    }).fillna(0)
-    compare_df.index.name = "방식"
-    compare_df = compare_df.reset_index()
-    compare_long = compare_df.melt(id_vars="방식", var_name="선수", value_name="승수")
-    fig2 = px.bar(compare_long, x="방식", y="승수", color="선수", barmode="group",
-                   color_discrete_sequence=FIGHTER_COLORS)
-    fig2 = style_chart(fig2)
-    st.plotly_chart(fig2, use_container_width=True)
+                    st.metric("전적 (승-패)", f"{s['wins']}승 {s['losses']}패")
+                    st.metric("승률", f"{s['win_rate']:.1f}%")
 
-    st.markdown("### 스타일 비교 (레이더 차트)")
-    st.caption(
-        "경기당 유효타 · 정확도 · 테이크다운 · 컨트롤타임 · 서브미션 시도 · 승률을 "
-        "**전체 선수 대비 백분위**로 환산해 겹쳐 그렸습니다. 바깥쪽으로 뻗을수록 "
-        "그 항목에서 상위권이라는 뜻이라, 예를 들어 그래플러형(테이크다운·컨트롤타임 우세)과 "
-        "타격가형(유효타 정확도 우세)의 모양 차이가 한눈에 드러납니다."
-    )
-    vals_a, n_a = radar_values(fighter_a, metrics)
-    vals_b, n_b = radar_values(fighter_b, metrics)
-    if vals_a is None or vals_b is None:
-        st.write("두 선수 중 상세 경기 통계가 없는 선수가 있어 레이더 차트를 그릴 수 없습니다.")
-    else:
-        radar_fig = make_radar_chart([
-            (fighter_a, vals_a, FIGHTER_COLORS[0]),
-            (fighter_b, vals_b, FIGHTER_COLORS[1]),
-        ])
-        st.plotly_chart(radar_fig, use_container_width=True)
-        low_sample = [n for n in [(fighter_a, n_a), (fighter_b, n_b)] if n[1] < 3]
-        if low_sample:
-            names = ", ".join(n[0] for n in low_sample)
-            st.caption(f"⚠️ {names} 선수는 기록된 경기 수가 적어(3경기 미만) 참고용으로만 봐주세요.")
+                    bio_row = bio[bio["FIGHTER"] == s["name"]]
+                    if not bio_row.empty:
+                        row = bio_row.iloc[0]
+                        st.caption(
+                            f"신장 {row.get('HEIGHT', '정보없음')} · 리치 {row.get('REACH', '정보없음')} · "
+                            f"스탠스 {row.get('STANCE') if pd.notna(row.get('STANCE')) else '정보없음'}"
+                        )
 
-    st.markdown("### 🎥 이 매치업 하이라이트 찾아보기")
-    yt_query = quote(f"{fighter_a} vs {fighter_b} highlights")
-    st.markdown(
-        f"UFC 기록 데이터만으로는 '보는 재미'가 부족하니, 실제 경기 영상도 바로 찾아볼 수 있게 "
-        f"연결했습니다 → [YouTube에서 '{fighter_a} vs {fighter_b}' 하이라이트 검색하기]"
-        f"(https://www.youtube.com/results?search_query={yt_query})"
-    )
+                    career_row = career[career["FIGHTER"] == s["name"]]
+                    if not career_row.empty:
+                        cr = career_row.iloc[0]
+                        st.metric("경기당 유효타", f"{cr['sig_str_per_fight']:.1f}개" if pd.notna(cr["sig_str_per_fight"]) else "정보없음")
+                        m1, m2 = st.columns(2)
+                        m1.metric("유효타 정확도", f"{cr['sig_str_accuracy']:.0f}%" if pd.notna(cr["sig_str_accuracy"]) else "-")
+                        m2.metric("테이크다운 성공률", f"{cr['td_accuracy']:.0f}%" if pd.notna(cr["td_accuracy"]) else "-")
+                    else:
+                        st.caption("상세 경기 통계 데이터 없음")
 
-    st.markdown("### 맞대결 기록")
-    h2h = fights[
-        ((fights["fighter_1"] == fighter_a) & (fights["fighter_2"] == fighter_b)) |
-        ((fights["fighter_1"] == fighter_b) & (fights["fighter_2"] == fighter_a))
-    ]
-    if h2h.empty:
-        st.write("두 선수는 UFC에서 맞붙은 기록이 없습니다.")
-    else:
-        st.dataframe(h2h[["DATE", "EVENT", "winner", "loser", "METHOD", "weightclass"]])
+        st.markdown("##### 승리 방식 비교 (KO/TKO · Submission · Decision)")
+        compare_df = pd.DataFrame({
+            fighter_a: a["win_methods"],
+            fighter_b: b["win_methods"],
+        }).fillna(0)
+        compare_df.index.name = "방식"
+        compare_df = compare_df.reset_index()
+        compare_long = compare_df.melt(id_vars="방식", var_name="선수", value_name="승수")
+        fig2 = px.bar(compare_long, x="방식", y="승수", color="선수", barmode="group",
+                       color_discrete_sequence=FIGHTER_COLORS)
+        fig2 = style_chart(fig2)
+        st.plotly_chart(fig2, use_container_width=True)
+
+    with tab2:
+        st.caption(
+            "경기당 유효타 · 정확도 · 테이크다운 · 컨트롤타임 · 서브미션 시도 · 승률을 "
+            "**전체 선수 대비 백분위**로 환산해 겹쳐 그렸습니다. 바깥쪽으로 뻗을수록 "
+            "그 항목에서 상위권이라는 뜻이라, 그래플러형(테이크다운·컨트롤타임 우세)과 "
+            "타격가형(유효타 정확도 우세)의 모양 차이가 한눈에 드러납니다. 위 '전적 · 스탯' 탭의 "
+            "**그래플링 지수 / 타격 지수** 배지는 이 레이더 값을 바탕으로 자동 계산됩니다."
+        )
+        vals_a, n_a = radar_values(fighter_a, metrics)
+        vals_b, n_b = radar_values(fighter_b, metrics)
+        if vals_a is None or vals_b is None:
+            st.write("두 선수 중 상세 경기 통계가 없는 선수가 있어 레이더 차트를 그릴 수 없습니다.")
+        else:
+            radar_fig = make_radar_chart([
+                (fighter_a, vals_a, FIGHTER_COLORS[0]),
+                (fighter_b, vals_b, FIGHTER_COLORS[1]),
+            ])
+            st.plotly_chart(radar_fig, use_container_width=True)
+            low_sample = [n for n in [(fighter_a, n_a), (fighter_b, n_b)] if n[1] < 3]
+            if low_sample:
+                names = ", ".join(n[0] for n in low_sample)
+                st.caption(f"⚠️ {names} 선수는 기록된 경기 수가 적어(3경기 미만) 참고용으로만 봐주세요.")
+
+    with tab3:
+        st.markdown("##### 🎥 이 매치업 하이라이트 찾아보기")
+        yt_query = quote(f"{fighter_a} vs {fighter_b} highlights")
+        st.markdown(
+            f"UFC 기록 데이터만으로는 '보는 재미'가 부족하니, 실제 경기 영상도 바로 찾아볼 수 있게 "
+            f"연결했습니다 → [YouTube에서 '{fighter_a} vs {fighter_b}' 하이라이트 검색하기]"
+            f"(https://www.youtube.com/results?search_query={yt_query})"
+        )
+
+        st.markdown("##### 맞대결 기록")
+        h2h = fights[
+            ((fights["fighter_1"] == fighter_a) & (fights["fighter_2"] == fighter_b)) |
+            ((fights["fighter_1"] == fighter_b) & (fights["fighter_2"] == fighter_a))
+        ]
+        if h2h.empty:
+            st.write("두 선수는 UFC에서 맞붙은 기록이 없습니다.")
+        else:
+            st.dataframe(h2h[["DATE", "EVENT", "winner", "loser", "METHOD", "weightclass"]])
+
+    st.caption("선수 사진 출처: Wikipedia (해당 선수 문서가 없거나 사진이 없으면 이니셜 아바타로 대체됩니다.)")
 
 # ==============================================================
 # 화면 3. 체급별 트렌드
@@ -423,20 +529,26 @@ elif page == "🇰🇷 한국 파이터":
     for col, fighter, color in zip(cols, KOREAN_FIGHTERS, TRIO_COLORS):
         name = fighter["name"]
         with col:
-            st.markdown(avatar_html(name, color, size=72), unsafe_allow_html=True)
-            st.subheader(f"{fighter['kor']}")
-            st.caption(f"{name} · {fighter['style']}")
+            with st.container(border=True):
+                st.markdown(render_avatar(name, color, size=92), unsafe_allow_html=True)
+                st.subheader(fighter["kor"])
+                st.caption(f"{name} · '{fighter['nickname']}'")
 
-            wins = (fights["winner"] == name).sum()
-            losses = (fights["loser"] == name).sum()
-            st.metric("전적 (승-패)", f"{wins}승 {losses}패")
+                style = classify_style(name, metrics)
+                if style:
+                    st.markdown(f"**{style['label']}**")
+                    st.caption(f"그래플링 지수 {style['grapple_score']} · 타격 지수 {style['strike_score']}")
 
-            career_row = career[career["FIGHTER"] == name]
-            if not career_row.empty:
-                cr = career_row.iloc[0]
-                m1, m2 = st.columns(2)
-                m1.metric("유효타 정확도", f"{cr['sig_str_accuracy']:.0f}%" if pd.notna(cr["sig_str_accuracy"]) else "-")
-                m2.metric("테이크다운 정확도", f"{cr['td_accuracy']:.0f}%" if pd.notna(cr["td_accuracy"]) else "-")
+                wins = (fights["winner"] == name).sum()
+                losses = (fights["loser"] == name).sum()
+                st.metric("전적 (승-패)", f"{wins}승 {losses}패")
+
+                career_row = career[career["FIGHTER"] == name]
+                if not career_row.empty:
+                    cr = career_row.iloc[0]
+                    m1, m2 = st.columns(2)
+                    m1.metric("유효타 정확도", f"{cr['sig_str_accuracy']:.0f}%" if pd.notna(cr["sig_str_accuracy"]) else "-")
+                    m2.metric("테이크다운 정확도", f"{cr['td_accuracy']:.0f}%" if pd.notna(cr["td_accuracy"]) else "-")
 
         vals, n = radar_values(name, metrics)
         if vals is not None:
@@ -446,12 +558,15 @@ elif page == "🇰🇷 한국 파이터":
     if len(radar_entries) >= 2:
         st.plotly_chart(make_radar_chart(radar_entries), use_container_width=True)
         st.caption(
-            "테이크다운·컨트롤타임 쪽으로 뻗어 있으면 그래플러형, 유효타 정확도 쪽으로 "
-            "뻗어 있으면 타격가형입니다. 세 선수의 모양이 다르게 나온다면, 실제로 서로 "
-            "다른 스타일로 UFC에서 활동했다는 뜻입니다."
+            "🥋 그래플러형 / 👊 타격가형 / ⚖️ 올라운더형 표시는 위 카드의 '그래플링 지수'와 "
+            "'타격 지수'(테이크다운·컨트롤타임·서브미션 시도 vs 유효타 정확도·빈도를 각각 전체 "
+            "선수 대비 백분위로 평균 낸 값)를 비교해 자동으로 계산한 것입니다. 세 선수의 레이더 "
+            "모양이 서로 다르게 나온다면, 실제로 다른 스타일로 UFC에서 활동했다는 뜻입니다."
         )
     else:
         st.write("레이더 차트를 그릴 만큼 상세 통계가 있는 선수가 부족합니다.")
+
+    st.caption("선수 사진 출처: Wikipedia")
 
     st.info(
         "이 페이지는 '한국 팬들이 바로 알아볼 수 있는 선수부터 보여주자'는 피드백을 반영해 "
