@@ -30,7 +30,8 @@ from urllib.parse import quote
 
 st.set_page_config(page_title="UFC 선수 비교 분석기", page_icon="🥊", layout="wide")
 
-# 가벼운 디자인 폴리시: 카드 모서리를 둥글게, 그림자로 입체감, 아바타/사진을 원형으로
+# 다크 테마 + 카드형 레이아웃: 스포츠 중계 화면처럼 큰 숫자·굵은 라벨이 잘 보이도록,
+# 장식용 이모지 대신 색상 배지/타이포그래피로 정보 위계를 표현
 st.markdown(
     """
     <style>
@@ -38,10 +39,17 @@ st.markdown(
         border-radius: 14px;
     }
     div[data-testid="stVerticalBlockBorderWrapper"] {
-        box-shadow: 0 1px 4px rgba(11,11,11,0.08);
+        box-shadow: 0 1px 6px rgba(0,0,0,0.35);
         border-radius: 14px;
+        border: 1px solid rgba(255,255,255,0.08) !important;
     }
-    [data-testid="stMetricLabel"] { color: #52514e; }
+    [data-testid="stMetricLabel"] {
+        color: #c3c2b7;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-size: 0.72rem !important;
+    }
+    [data-testid="stMetricValue"] { font-weight: 800; }
     .stTabs [data-baseweb="tab-list"] { gap: 4px; }
     </style>
     """,
@@ -49,28 +57,48 @@ st.markdown(
 )
 
 # ------------------------------------------------------------
-# 색상 팔레트 (dataviz 스킬의 검증된 카테고리 팔레트 — 고정 슬롯 매핑)
+# 색상 팔레트 (dataviz 스킬의 검증된 카테고리 팔레트 — 다크 서피스용 스텝, 고정 슬롯 매핑)
 # 방식(승리 방식)은 항상 같은 색을 갖도록 고정: 필터가 바뀌어도 색이 안 변함
 # ------------------------------------------------------------
+CHART_SURFACE = "#1a1a19"   # 다크 모드 차트 배경
+CHART_INK = "#ffffff"       # 다크 모드 주 텍스트
+CHART_GRID = "#2c2c2a"      # 다크 모드 격자선
+CHART_AXIS = "#383835"      # 다크 모드 축선
+ACCENT_RED = "#e0393e"      # 앱 강조색 (스포츠 중계 느낌의 레드 포인트)
+
 METHOD_COLORS = {
-    "Decision": "#2a78d6",    # slot 1 blue
-    "KO/TKO": "#eb6834",      # slot 2 orange
-    "Submission": "#1baf7a",  # slot 3 aqua
-    "DQ": "#eda100",          # slot 4 yellow
-    "기타": "#e34948",        # slot 8 red (fallback)
+    "Decision": "#3987e5",    # slot 1 blue (dark)
+    "KO/TKO": "#d95926",      # slot 2 orange (dark)
+    "Submission": "#199e70",  # slot 3 aqua (dark)
+    "DQ": "#c98500",          # slot 4 yellow (dark)
+    "기타": "#e66767",        # slot 8 red (dark, fallback)
 }
-FIGHTER_COLORS = ["#2a78d6", "#eb6834"]        # 선수 A/B 비교용 slot 1, 2
-TRIO_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]  # 3인 비교(한국 파이터)용 slot 1,2,3 — all-pairs 검증된 조합
+FIGHTER_COLORS = ["#3987e5", "#d95926"]        # 선수 A/B 비교용 slot 1, 2
+TRIO_COLORS = ["#3987e5", "#d95926", "#199e70"]  # 3인 비교(한국 파이터)용 slot 1,2,3 — all-pairs 검증된 조합
+STYLE_COLORS = {
+    "그래플러형": TRIO_COLORS[2],
+    "타격가형": TRIO_COLORS[1],
+    "올라운더형": TRIO_COLORS[0],
+}
 
 CHART_TEMPLATE = dict(
-    plot_bgcolor="#fcfcfb",
-    paper_bgcolor="#fcfcfb",
-    font=dict(color="#0b0b0b", family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
-    xaxis=dict(gridcolor="#e1e0d9", linecolor="#c3c2b7"),
-    yaxis=dict(gridcolor="#e1e0d9", linecolor="#c3c2b7"),
+    plot_bgcolor=CHART_SURFACE,
+    paper_bgcolor=CHART_SURFACE,
+    font=dict(color=CHART_INK, family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
+    xaxis=dict(gridcolor=CHART_GRID, linecolor=CHART_AXIS),
+    yaxis=dict(gridcolor=CHART_GRID, linecolor=CHART_AXIS),
     legend=dict(bgcolor="rgba(0,0,0,0)"),
     margin=dict(t=30, b=10, l=10, r=10),
 )
+
+
+def style_badge_html(label):
+    color = STYLE_COLORS.get(label, "#666666")
+    return (
+        f'<span style="display:inline-block;background:{color};color:#ffffff;'
+        f'padding:3px 12px;border-radius:999px;font-size:12px;font-weight:700;'
+        f'letter-spacing:0.02em;">{label}</span>'
+    )
 
 
 def style_chart(fig):
@@ -164,12 +192,12 @@ def make_radar_chart(entries):
         ))
     fig.update_layout(
         polar=dict(
-            bgcolor="#fcfcfb",
-            radialaxis=dict(visible=True, range=[0, 100], gridcolor="#e1e0d9", linecolor="#c3c2b7"),
-            angularaxis=dict(gridcolor="#e1e0d9", linecolor="#c3c2b7"),
+            bgcolor=CHART_SURFACE,
+            radialaxis=dict(visible=True, range=[0, 100], gridcolor=CHART_GRID, linecolor=CHART_AXIS),
+            angularaxis=dict(gridcolor=CHART_GRID, linecolor=CHART_AXIS),
         ),
-        paper_bgcolor="#fcfcfb",
-        font=dict(color="#0b0b0b", family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
+        paper_bgcolor=CHART_SURFACE,
+        font=dict(color=CHART_INK, family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
         legend=dict(bgcolor="rgba(0,0,0,0)"),
         margin=dict(t=30, b=10, l=10, r=10),
     )
@@ -177,35 +205,77 @@ def make_radar_chart(entries):
 
 
 # ------------------------------------------------------------
-# 선수 얼굴 사진 (Wikipedia에서 실시간 조회, 없으면 이니셜 아바타로 대체)
+# 선수 얼굴 사진 (실시간 조회, 없으면 이니셜 아바타로 대체)
 # 2,740명 전원의 사진을 직접 수급/저장하는 건 이번 마감 안에는 무리라,
-# 위키백과 공개 API를 그때그때 조회해서 있으면 보여주는 방식으로 구현
+# 공개 API를 그때그때 조회해서 있으면 보여주는 방식으로 구현.
+# 1순위: 영어 위키백과 → 2순위: 한국어 위키백과 → 3순위: Wikidata 이미지(P18)
+# (영어 위키백과 문서 자체에 사진이 없는 선수를 위한 보강 — 예: 최두호)
 # ------------------------------------------------------------
 WIKI_TITLE_OVERRIDES = {
-    "Dooho Choi": "Doo Ho Choi",  # 데이터셋 표기(띄어쓰기 없음) -> 위키백과 표기
+    "Dooho Choi": "Choi Doo-ho",  # 데이터셋 표기 -> 영어 위키백과 정식 표기
 }
+# 영어 위키백과에 사진이 없는 선수를 위한 보강 소스 (필요한 선수만 등록)
+PHOTO_FALLBACK_OVERRIDES = {
+    "Dooho Choi": {"ko_title": "최두호", "wikidata_qid": "Q16233713"},
+}
+WIKI_HEADERS = {"User-Agent": "PlayLabAcademy-UFC-App/1.0 (educational project)"}
+
+
+def _wiki_summary_thumbnail(lang, title):
+    try:
+        resp = requests.get(
+            f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{quote(title)}",
+            headers=WIKI_HEADERS, timeout=3,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("type") == "disambiguation":
+                return None
+            return (data.get("thumbnail") or {}).get("source")
+    except Exception:
+        pass
+    return None
+
+
+def _wikidata_image(qid):
+    try:
+        resp = requests.get(
+            f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
+            headers=WIKI_HEADERS, timeout=3,
+        )
+        if resp.status_code == 200:
+            entity = resp.json()["entities"][qid]
+            p18 = entity.get("claims", {}).get("P18")
+            if p18:
+                filename = p18[0]["mainsnak"]["datavalue"]["value"]
+                return f"https://commons.wikimedia.org/wiki/Special:FilePath/{quote(filename.replace(' ', '_'))}"
+    except Exception:
+        pass
+    return None
 
 
 @st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
 def get_fighter_photo_url(name):
     title = WIKI_TITLE_OVERRIDES.get(name, name)
     candidates = [title, f"{title} (fighter)", f"{title} (mixed martial artist)", f"{title} (martial artist)"]
-    headers = {"User-Agent": "PlayLabAcademy-UFC-App/1.0 (educational project)"}
     for candidate in candidates:
-        try:
-            resp = requests.get(
-                f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(candidate)}",
-                headers=headers, timeout=3,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("type") == "disambiguation":
-                    continue
-                thumb = (data.get("thumbnail") or {}).get("source")
-                if thumb:
-                    return thumb
-        except Exception:
-            continue
+        thumb = _wiki_summary_thumbnail("en", candidate)
+        if thumb:
+            return thumb
+
+    fallback = PHOTO_FALLBACK_OVERRIDES.get(name)
+    if fallback:
+        ko_title = fallback.get("ko_title")
+        if ko_title:
+            thumb = _wiki_summary_thumbnail("ko", ko_title)
+            if thumb:
+                return thumb
+        qid = fallback.get("wikidata_qid")
+        if qid:
+            thumb = _wikidata_image(qid)
+            if thumb:
+                return thumb
+
     return None
 
 
@@ -242,11 +312,11 @@ def classify_style(name, metrics):
     s = sum(strike_vals) / len(strike_vals)
     diff = g - s
     if diff >= 15:
-        label = "🥋 그래플러형"
+        label = "그래플러형"
     elif diff <= -15:
-        label = "👊 타격가형"
+        label = "타격가형"
     else:
-        label = "⚖️ 올라운더형"
+        label = "올라운더형"
     return {"label": label, "grapple_score": round(g, 1), "strike_score": round(s, 1)}
 
 
@@ -354,7 +424,7 @@ elif page == "🥊 선수 비교":
     a = fighter_record(fighter_a)
     b = fighter_record(fighter_b)
 
-    tab1, tab2, tab3 = st.tabs(["📋 전적 · 스탯", "🕸️ 스타일 레이더", "🥊 맞대결 · 하이라이트"])
+    tab1, tab2, tab3 = st.tabs(["전적 · 스탯", "스타일 레이더", "맞대결 · 하이라이트"])
 
     with tab1:
         col1, col2 = st.columns(2)
@@ -366,7 +436,7 @@ elif page == "🥊 선수 비교":
 
                     style = classify_style(s["name"], metrics)
                     if style:
-                        st.markdown(f"**{style['label']}**")
+                        st.markdown(style_badge_html(style["label"]), unsafe_allow_html=True)
                         st.caption(f"그래플링 지수 {style['grapple_score']} · 타격 지수 {style['strike_score']} (전체 선수 백분위 평균)")
 
                     st.metric("전적 (승-패)", f"{s['wins']}승 {s['losses']}패")
@@ -424,10 +494,10 @@ elif page == "🥊 선수 비교":
             low_sample = [n for n in [(fighter_a, n_a), (fighter_b, n_b)] if n[1] < 3]
             if low_sample:
                 names = ", ".join(n[0] for n in low_sample)
-                st.caption(f"⚠️ {names} 선수는 기록된 경기 수가 적어(3경기 미만) 참고용으로만 봐주세요.")
+                st.caption(f"참고: {names} 선수는 기록된 경기 수가 적어(3경기 미만) 참고용으로만 봐주세요.")
 
     with tab3:
-        st.markdown("##### 🎥 이 매치업 하이라이트 찾아보기")
+        st.markdown("##### 매치업 하이라이트")
         yt_query = quote(f"{fighter_a} vs {fighter_b} highlights")
         st.markdown(
             f"UFC 기록 데이터만으로는 '보는 재미'가 부족하니, 실제 경기 영상도 바로 찾아볼 수 있게 "
@@ -479,7 +549,7 @@ elif page == "📊 체급별 트렌드":
 
     fig4 = px.line(yearly, x="year", y="피니시비율", markers=True,
                     labels={"year": "연도", "피니시비율": "피니시(KO·서브미션) 비율(%)"},
-                    color_discrete_sequence=["#2a78d6"])
+                    color_discrete_sequence=[FIGHTER_COLORS[0]])
     fig4 = style_chart(fig4)
     st.plotly_chart(fig4, use_container_width=True)
     st.caption("판정까지 가지 않고 KO나 서브미션으로 끝난 경기 비율이 시대별로 어떻게 변했는지 보여줍니다.")
@@ -508,7 +578,7 @@ elif page == "📊 체급별 트렌드":
     else:
         fig5 = px.bar(
             top_winners.sort_values("승수"), x="승수", y="선수", orientation="h",
-            color_discrete_sequence=["#2a78d6"],
+            color_discrete_sequence=[FIGHTER_COLORS[0]],
         )
         fig5 = style_chart(fig5)
         st.plotly_chart(fig5, use_container_width=True)
@@ -536,7 +606,7 @@ elif page == "🇰🇷 한국 파이터":
 
                 style = classify_style(name, metrics)
                 if style:
-                    st.markdown(f"**{style['label']}**")
+                    st.markdown(style_badge_html(style["label"]), unsafe_allow_html=True)
                     st.caption(f"그래플링 지수 {style['grapple_score']} · 타격 지수 {style['strike_score']}")
 
                 wins = (fights["winner"] == name).sum()
@@ -558,7 +628,7 @@ elif page == "🇰🇷 한국 파이터":
     if len(radar_entries) >= 2:
         st.plotly_chart(make_radar_chart(radar_entries), use_container_width=True)
         st.caption(
-            "🥋 그래플러형 / 👊 타격가형 / ⚖️ 올라운더형 표시는 위 카드의 '그래플링 지수'와 "
+            "그래플러형 / 타격가형 / 올라운더형 표시는 위 카드의 '그래플링 지수'와 "
             "'타격 지수'(테이크다운·컨트롤타임·서브미션 시도 vs 유효타 정확도·빈도를 각각 전체 "
             "선수 대비 백분위로 평균 낸 값)를 비교해 자동으로 계산한 것입니다. 세 선수의 레이더 "
             "모양이 서로 다르게 나온다면, 실제로 다른 스타일로 UFC에서 활동했다는 뜻입니다."
