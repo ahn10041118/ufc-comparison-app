@@ -196,7 +196,7 @@ def render_radar_metric_guide():
             st.markdown(f"**{RADAR_LABELS[key]}** — {RADAR_METRIC_DESC[key]}")
 
 
-@st.cache_data
+@st.cache_data(show_spinner="🥊 선수별 스탯 계산하는 중...")
 def build_fighter_metrics(fights, career):
     decided = fights[fights["result_type"] == "승패"]
     wins = decided.groupby("winner").size()
@@ -569,7 +569,7 @@ def render_career_timeline(fighter_a, fighter_b, fights_df, window=5):
     st.plotly_chart(fig8, use_container_width=True)
 
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def build_reach_height_table(bio):
     df = bio[["FIGHTER", "HEIGHT", "REACH"]].copy()
     df["height_in"] = df["HEIGHT"].apply(_parse_height_inches)
@@ -583,7 +583,7 @@ def build_reach_height_table(bio):
 # 체급은 각 선수가 가장 많이 뛴 체급(최빈값)으로, 스타일은 classify_style과 같은 기준을
 # 벡터 연산으로 한 번에 계산해 붙인다.
 # ------------------------------------------------------------
-@st.cache_data
+@st.cache_data(show_spinner="🔍 전체 선수 랭킹 정리하는 중...")
 def build_roster_table(fights, metrics):
     div_source = pd.concat([
         fights[["fighter_1", "weight_division"]].rename(columns={"fighter_1": "FIGHTER"}),
@@ -614,7 +614,7 @@ def build_roster_table(fights, metrics):
 # ------------------------------------------------------------
 # 데이터 로드
 # ------------------------------------------------------------
-@st.cache_data
+@st.cache_data(show_spinner="🥊 UFC 전적 데이터 불러오는 중...")
 def load_data():
     fights = pd.read_csv("data/ufc_fights.csv")
     fights["DATE"] = pd.to_datetime(fights["DATE"], errors="coerce")
