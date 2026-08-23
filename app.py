@@ -313,7 +313,7 @@ def render_avatar(name, color, size=64):
     if photo_url:
         return (
             f'<img src="{photo_url}" style="width:{size}px;height:{size}px;'
-            f"border-radius:50%;object-fit:cover;border:3px solid {color};"
+            f"border-radius:50%;object-fit:cover;object-position:50% 15%;border:3px solid {color};"
             f'display:block;margin-bottom:6px;" />'
         )
     return avatar_html(name, color, size)
