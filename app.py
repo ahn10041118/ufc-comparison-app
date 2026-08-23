@@ -44,6 +44,12 @@ st.markdown(
         box-shadow: 0 1px 6px rgba(0,0,0,0.35);
         border-radius: 14px;
         border: 1px solid rgba(255,255,255,0.08) !important;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 24px rgba(0,0,0,0.5);
+        border-color: rgba(224,57,62,0.45) !important;
     }
     [data-testid="stMetricLabel"] {
         color: #c3c2b7;
@@ -53,6 +59,8 @@ st.markdown(
     }
     [data-testid="stMetricValue"] { font-weight: 800; }
     .stTabs [data-baseweb="tab-list"] { gap: 4px; }
+    h2, h3 { margin-top: 0.9em; letter-spacing: 0.01em; }
+    section[data-testid="stSidebar"] .stRadio label { font-size: 0.95rem; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -548,6 +556,20 @@ NAV_OPTIONS = ["🏠 소개", "🥊 선수 비교", "📊 체급별 트렌드", 
 if "nav_page" not in st.session_state:
     st.session_state.nav_page = NAV_OPTIONS[0]
 
+st.sidebar.markdown(
+    f"""
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
+        <div style="width:34px;height:34px;border-radius:9px;background:{ACCENT_RED};
+                    display:flex;align-items:center;justify-content:center;font-size:1.1rem;">🥊</div>
+        <div style="line-height:1.2;">
+            <div style="font-weight:800;font-size:0.95rem;color:#ffffff;">UFC 분석기</div>
+            <div style="font-size:0.7rem;color:#8a8a86;letter-spacing:0.04em;">DATA-DRIVEN</div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 page = st.sidebar.radio("화면 선택", NAV_OPTIONS, key="nav_page")
 
 
@@ -566,16 +588,30 @@ st.sidebar.caption(
 # 화면 1. 소개
 # ==============================================================
 if page == "🏠 소개":
-    st.title("🥊 UFC 선수 비교 분석기")
-
     st.markdown(
-        """
-        UFC 팬들 사이에서 "저 선수 진짜 세냐", "이번에 붙으면 누가 이길까" 논쟁은
-        늘 하이라이트 영상 몇 개로 끝나버립니다. 하지만 UFC는 경기마다 유효타 수,
-        테이크다운 성공률, 컨트롤 타임까지 상세히 기록되는 스포츠입니다. 이 사이트는
-        그 기록을 근거로 **감이 아니라 데이터로** 선수를 비교하고, 체급 전체의 흐름까지
-        읽을 수 있게 만들었습니다.
-        """
+        f"""
+        <div style="
+            background: linear-gradient(135deg, #2a0a0b 0%, {CHART_SURFACE} 55%, #0d0d0d 100%);
+            border: 1px solid rgba(224,57,62,0.35);
+            border-radius: 18px;
+            padding: 40px 36px;
+            margin-bottom: 26px;
+        ">
+            <div style="color:{ACCENT_RED};font-weight:800;letter-spacing:0.14em;
+                        text-transform:uppercase;font-size:0.78rem;margin-bottom:10px;">
+                DATA-DRIVEN FIGHT ANALYSIS
+            </div>
+            <div style="font-size:2.3rem;font-weight:800;color:#ffffff;line-height:1.2;">
+                🥊 UFC 선수 비교 분석기
+            </div>
+            <div style="color:#c3c2b7;font-size:1rem;margin-top:14px;max-width:700px;line-height:1.6;">
+                "저 선수 진짜 세냐", "이번에 붙으면 누가 이길까" — 하이라이트 영상 몇 개가 아니라
+                <strong style="color:#ffffff;">경기당 유효타 · 테이크다운 · 컨트롤 타임 기록</strong>으로
+                답을 찾습니다.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     col1, col2, col3 = st.columns(3)
