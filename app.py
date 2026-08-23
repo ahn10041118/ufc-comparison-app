@@ -207,7 +207,7 @@ def build_fighter_metrics(fights, career):
     record.index.name = "FIGHTER"
     record = record.reset_index()
 
-    metrics = career.merge(record[["FIGHTER", "win_rate"]], on="FIGHTER", how="left")
+    metrics = career.merge(record[["FIGHTER", "wins", "losses", "win_rate"]], on="FIGHTER", how="left")
     metrics["sub_att_per_fight"] = metrics["total_sub_att"] / metrics["fights_recorded"]
 
     # 극단치 방지를 위해 3경기 이상 기록이 있는 선수만 비교 모집단으로 사용
@@ -259,6 +259,30 @@ def make_radar_chart(entries):
         margin=dict(t=30, b=10, l=10, r=10),
     )
     return fig
+
+
+# ------------------------------------------------------------
+# 가상 대결 승부 예측기 — 실제 예측 모델이 아니라, 레이더 차트에 쓰는 6개 백분위 지표의
+# 평균 차이를 로지스틱 함수로 눌러 "확률처럼" 보여주는 참고용 지표. 스타일 상성 · 부상 ·
+# 컨디션 등은 전혀 반영하지 않으므로 재미로만 보라는 캡션을 항상 함께 표시한다.
+# ------------------------------------------------------------
+def predict_matchup(fighter_a, fighter_b, metrics):
+    vals_a, n_a = radar_values(fighter_a, metrics)
+    vals_b, n_b = radar_values(fighter_b, metrics)
+    if vals_a is None or vals_b is None:
+        return None
+    # 결측 지표는 중간값(50)으로 대체해 특정 지표 하나가 극단적으로 결과를 흔들지 않게 함
+    vals_a = [v if pd.notna(v) else 50 for v in vals_a]
+    vals_b = [v if pd.notna(v) else 50 for v in vals_b]
+    avg_a = sum(vals_a) / len(vals_a)
+    avg_b = sum(vals_b) / len(vals_b)
+    diff = avg_a - avg_b
+    prob_a = 1 / (1 + np.exp(-0.05 * diff))
+    return {
+        "avg_a": avg_a, "avg_b": avg_b, "diff": diff,
+        "prob_a": prob_a * 100, "prob_b": (1 - prob_a) * 100,
+        "n_a": n_a, "n_b": n_b,
+    }
 
 
 # ------------------------------------------------------------
@@ -555,6 +579,39 @@ def build_reach_height_table(bio):
 
 
 # ------------------------------------------------------------
+# 전체 선수 검색·랭킹 테이블 — 체급/스타일/전적으로 필터링해 전체 선수를 탐색할 수 있도록
+# 체급은 각 선수가 가장 많이 뛴 체급(최빈값)으로, 스타일은 classify_style과 같은 기준을
+# 벡터 연산으로 한 번에 계산해 붙인다.
+# ------------------------------------------------------------
+@st.cache_data
+def build_roster_table(fights, metrics):
+    div_source = pd.concat([
+        fights[["fighter_1", "weight_division"]].rename(columns={"fighter_1": "FIGHTER"}),
+        fights[["fighter_2", "weight_division"]].rename(columns={"fighter_2": "FIGHTER"}),
+    ])
+    div_source = div_source[div_source["weight_division"].notna() & (div_source["weight_division"] != "기타")]
+    main_division = div_source.groupby("FIGHTER")["weight_division"].agg(lambda s: s.value_counts().idxmax())
+
+    roster = metrics.reset_index()
+    roster["주 체급"] = roster["FIGHTER"].map(main_division).fillna("정보없음")
+
+    grapple_avg = roster[[f"pct_{k}" for k in GRAPPLE_KEYS]].mean(axis=1, skipna=True)
+    strike_avg = roster[[f"pct_{k}" for k in STRIKE_KEYS]].mean(axis=1, skipna=True)
+    style_diff = grapple_avg - strike_avg
+    roster["스타일"] = np.select(
+        [style_diff >= 15, style_diff <= -15],
+        ["그래플러형", "타격가형"],
+        default="올라운더형",
+    )
+    roster.loc[grapple_avg.isna() | strike_avg.isna(), "스타일"] = "정보부족"
+
+    roster["wins"] = roster["wins"].fillna(0).astype(int)
+    roster["losses"] = roster["losses"].fillna(0).astype(int)
+    roster["win_rate"] = roster["win_rate"].round(1)
+    return roster
+
+
+# ------------------------------------------------------------
 # 데이터 로드
 # ------------------------------------------------------------
 @st.cache_data
@@ -583,7 +640,7 @@ KOREAN_FIGHTERS = [
 # 사이드바 내비게이션
 # (소개 페이지의 미리보기 카드에서 버튼으로 바로 이동할 수 있도록 session_state로 관리)
 # ------------------------------------------------------------
-NAV_OPTIONS = ["🏠 소개", "🥊 선수 비교", "📊 체급별 트렌드", "🇰🇷 한국 파이터"]
+NAV_OPTIONS = ["🏠 소개", "🥊 선수 비교", "📊 체급별 트렌드", "🔍 전체 선수", "🇰🇷 한국 파이터"]
 if "nav_page" not in st.session_state:
     st.session_state.nav_page = NAV_OPTIONS[0]
 
@@ -742,7 +799,9 @@ elif page == "🥊 선수 비교":
     a = fighter_record(fighter_a)
     b = fighter_record(fighter_b)
 
-    tab1, tab2, tab3, tab4 = st.tabs(["전적 · 스탯", "스타일 레이더", "맞대결 · 하이라이트", "커리어 흐름"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["전적 · 스탯", "스타일 레이더", "맞대결 · 하이라이트", "커리어 흐름", "가상 대결 예측"]
+    )
 
     with tab1:
         col1, col2 = st.columns(2)
@@ -791,6 +850,35 @@ elif page == "🥊 선수 비교":
                        color_discrete_sequence=FIGHTER_COLORS)
         fig2 = style_chart(fig2)
         st.plotly_chart(fig2, use_container_width=True)
+
+        career_a = career[career["FIGHTER"] == fighter_a]
+        career_b = career[career["FIGHTER"] == fighter_b]
+
+        def _stat(df, col):
+            if df.empty or pd.isna(df.iloc[0].get(col)):
+                return None
+            return df.iloc[0][col]
+
+        compare_stats = pd.DataFrame({
+            "지표": ["승", "패", "승률(%)", "경기당 유효타", "유효타 정확도(%)", "테이크다운 정확도(%)", "컨트롤타임(분/경기)"],
+            fighter_a: [
+                a["wins"], a["losses"], round(a["win_rate"], 1),
+                _stat(career_a, "sig_str_per_fight"), _stat(career_a, "sig_str_accuracy"),
+                _stat(career_a, "td_accuracy"), _stat(career_a, "ctrl_min_per_fight"),
+            ],
+            fighter_b: [
+                b["wins"], b["losses"], round(b["win_rate"], 1),
+                _stat(career_b, "sig_str_per_fight"), _stat(career_b, "sig_str_accuracy"),
+                _stat(career_b, "td_accuracy"), _stat(career_b, "ctrl_min_per_fight"),
+            ],
+        })
+        csv_bytes = compare_stats.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            f"'{fighter_a} vs {fighter_b}' 비교 데이터 CSV 다운로드",
+            data=csv_bytes,
+            file_name=f"{fighter_a}_vs_{fighter_b}_compare.csv",
+            mime="text/csv",
+        )
 
     with tab2:
         st.caption(
@@ -845,6 +933,42 @@ elif page == "🥊 선수 비교":
 
     with tab4:
         render_career_timeline(fighter_a, fighter_b, fights)
+
+    with tab5:
+        st.caption(
+            "실제 승부 예측 모델이 아니라, '스타일 레이더' 탭에 쓰인 6개 지표의 전체 선수 대비 "
+            "백분위 평균을 단순 비교해 만든 참고용 지표입니다. 스타일 상성 · 부상 · 그날의 컨디션 "
+            "같은 요소는 전혀 반영하지 않으니 재미로만 봐주세요."
+        )
+        pred = predict_matchup(fighter_a, fighter_b, metrics)
+        if pred is None:
+            st.write("두 선수 중 상세 경기 통계가 없는 선수가 있어 예측할 수 없습니다.")
+        else:
+            prob_a_pct, prob_b_pct = pred["prob_a"], pred["prob_b"]
+            st.markdown(
+                f'<div style="display:flex;height:34px;border-radius:8px;overflow:hidden;margin:14px 0 10px 0;">'
+                f'<div style="width:{prob_a_pct:.1f}%;background:{FIGHTER_COLORS[0]};display:flex;'
+                f'align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:0.85rem;">'
+                f'{prob_a_pct:.0f}%</div>'
+                f'<div style="width:{prob_b_pct:.1f}%;background:{FIGHTER_COLORS[1]};display:flex;'
+                f'align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:0.85rem;">'
+                f'{prob_b_pct:.0f}%</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            pc1, pc2 = st.columns(2)
+            pc1.metric(fighter_a, f"{prob_a_pct:.0f}%")
+            pc2.metric(fighter_b, f"{prob_b_pct:.0f}%")
+            st.caption(
+                f"{fighter_a}의 6개 지표 백분위 평균은 {pred['avg_a']:.1f}, {fighter_b}는 "
+                f"{pred['avg_b']:.1f}로 차이는 {abs(pred['diff']):.1f}점입니다. 이 차이를 완만한 곡선"
+                "(로지스틱 함수)으로 눌러서 확률처럼 보여준 것일 뿐, 통계적으로 검증된 승부 예측 "
+                "모델이 아닙니다."
+            )
+            low_sample = [n for n in [(fighter_a, pred["n_a"]), (fighter_b, pred["n_b"])] if n[1] < 3]
+            if low_sample:
+                names = ", ".join(n[0] for n in low_sample)
+                st.caption(f"참고: {names} 선수는 기록된 경기 수가 적어(3경기 미만) 정확도가 낮을 수 있습니다.")
 
     st.caption("선수 사진 출처: Wikipedia (해당 선수 문서가 없거나 사진이 없으면 이니셜 아바타로 대체됩니다.)")
 
@@ -963,7 +1087,54 @@ elif page == "📊 체급별 트렌드":
         )
 
 # ==============================================================
-# 화면 4. 한국 파이터
+# 화면 4. 전체 선수 검색·랭킹
+# ==============================================================
+elif page == "🔍 전체 선수":
+    st.title("🔍 전체 선수 검색 · 랭킹")
+    st.caption("데이터에 기록된 전체 선수를 이름 · 체급 · 스타일 · 최소 경기 수 조건으로 검색하고 승률순으로 정렬해서 살펴볼 수 있습니다.")
+
+    roster = build_roster_table(fights, metrics)
+
+    f1, f2, f3 = st.columns([2, 1, 1])
+    search = f1.text_input("선수 이름 검색", "", placeholder="예: McGregor")
+    division_options = ["전체"] + sorted(roster.loc[roster["주 체급"] != "정보없음", "주 체급"].unique().tolist())
+    division_filter = f2.selectbox("체급", division_options)
+    style_options = ["전체", "그래플러형", "타격가형", "올라운더형"]
+    style_filter = f3.selectbox("스타일", style_options)
+
+    min_fights = st.slider("최소 기록 경기 수", 0, 20, 3)
+
+    view = roster[roster["fights_recorded"] >= min_fights]
+    if search:
+        view = view[view["FIGHTER"].str.contains(search, case=False, na=False)]
+    if division_filter != "전체":
+        view = view[view["주 체급"] == division_filter]
+    if style_filter != "전체":
+        view = view[view["스타일"] == style_filter]
+    view = view.sort_values("win_rate", ascending=False)
+
+    st.caption(f"조건에 맞는 선수 {len(view)}명")
+
+    display_cols = view[[
+        "FIGHTER", "주 체급", "스타일", "wins", "losses", "win_rate",
+        "sig_str_accuracy", "td_accuracy", "fights_recorded",
+    ]].rename(columns={
+        "FIGHTER": "선수", "wins": "승", "losses": "패", "win_rate": "승률(%)",
+        "sig_str_accuracy": "유효타 정확도(%)", "td_accuracy": "테이크다운 정확도(%)",
+        "fights_recorded": "기록된 경기 수",
+    })
+    st.dataframe(display_cols, use_container_width=True, hide_index=True)
+
+    csv_bytes = display_cols.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        "현재 조건의 선수 목록 CSV 다운로드",
+        data=csv_bytes,
+        file_name="ufc_fighters_filtered.csv",
+        mime="text/csv",
+    )
+
+# ==============================================================
+# 화면 5. 한국 파이터
 # ==============================================================
 elif page == "🇰🇷 한국 파이터":
     st.title("🇰🇷 한국 파이터 스포트라이트")
