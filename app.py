@@ -365,6 +365,114 @@ def classify_style(name, metrics):
 
 
 # ------------------------------------------------------------
+# 닮은꼴 선수 추천 — 레이더 차트에 쓰는 6개 백분위 지표를 벡터로 놓고,
+# 유클리드 거리가 가장 가까운 다른 선수를 찾아 "스타일이 비슷한 선수"로 추천
+# ------------------------------------------------------------
+def find_similar_fighters(name, metrics, top_n=3, min_fights=3):
+    if name not in metrics.index:
+        return []
+    pct_cols = [f"pct_{k}" for k in RADAR_KEYS]
+    row = metrics.loc[name]
+    vec = np.array([row.get(c, np.nan) for c in pct_cols], dtype=float)
+    if np.isnan(vec).any():
+        return []
+
+    pool = metrics[(metrics["fights_recorded"] >= min_fights) & (metrics.index != name)]
+    pool_vals = pool[pct_cols].to_numpy(dtype=float)
+    valid = ~np.isnan(pool_vals).any(axis=1)
+    pool = pool[valid]
+    pool_vals = pool_vals[valid]
+    if len(pool) == 0:
+        return []
+
+    dists = np.sqrt(((pool_vals - vec) ** 2).sum(axis=1))
+    order = np.argsort(dists)[:top_n]
+    return [{"name": pool.index[i], "distance": float(dists[i])} for i in order]
+
+
+def render_similar_fighters(name, metrics, top_n=3):
+    similar = find_similar_fighters(name, metrics, top_n=top_n)
+    if not similar:
+        return
+    st.markdown(f"**{name}와(과) 스타일이 가장 비슷한 선수**")
+    st.caption("레이더 차트에 쓰인 6개 지표의 백분위 값을 벡터로 놓고, 거리가 가장 가까운 선수를 찾은 결과입니다.")
+    sim_cols = st.columns(len(similar))
+    for col, s in zip(sim_cols, similar):
+        with col:
+            st.markdown(render_avatar(s["name"], ACCENT_RED, size=56), unsafe_allow_html=True)
+            st.caption(s["name"])
+            twin_style = classify_style(s["name"], metrics)
+            if twin_style:
+                st.markdown(style_badge_html(twin_style["label"]), unsafe_allow_html=True)
+
+
+# ------------------------------------------------------------
+# 최근 폼 — 최근 5경기를 승/패 점으로 시각화 (지금 상승세인지 하락세인지 감을 잡기 위함)
+# ------------------------------------------------------------
+def recent_form(name, fights_df, n=5):
+    wins = fights_df[(fights_df["winner"] == name) & (fights_df["result_type"] == "승패")][["DATE", "METHOD"]].copy()
+    wins["result"] = "W"
+    losses = fights_df[(fights_df["loser"] == name) & (fights_df["result_type"] == "승패")][["DATE", "METHOD"]].copy()
+    losses["result"] = "L"
+    combined = pd.concat([wins, losses]).dropna(subset=["DATE"]).sort_values("DATE", ascending=False).head(n)
+    combined = combined.sort_values("DATE")
+    return combined.to_dict("records")
+
+
+def render_recent_form(name, fights_df, n=5):
+    form = recent_form(name, fights_df, n=n)
+    if not form:
+        return
+    win_color = TRIO_COLORS[2]
+    loss_color = ACCENT_RED
+    dots = ""
+    for f in form:
+        is_win = f["result"] == "W"
+        color = win_color if is_win else loss_color
+        label = "승" if is_win else "패"
+        method = str(f.get("METHOD", "")).strip()
+        title = f'{f["DATE"].date()} · {label} · {method}'
+        dots += (
+            f'<span title="{title}" style="display:inline-block;width:14px;height:14px;'
+            f'border-radius:50%;background:{color};margin-right:5px;"></span>'
+        )
+    st.markdown(f'<div style="margin:4px 0;">{dots}</div>', unsafe_allow_html=True)
+    st.caption("최근 5경기 (왼쪽=과거 → 오른쪽=최신, 초록 승 · 빨강 패)")
+
+
+# ------------------------------------------------------------
+# 리치-신장 비율 — "리치가 긴 선수가 실제로 유리한가?" (참고: Lucy Liu의 UFC 데이터 분석 글)
+# HEIGHT는 "5' 11\"", REACH는 "71\"" 형식의 문자열이라 인치 단위 숫자로 파싱
+# ------------------------------------------------------------
+def _parse_height_inches(h):
+    if not isinstance(h, str) or h.strip() in ("--", ""):
+        return np.nan
+    try:
+        feet_part, inches_part = h.replace('"', "").split("'")
+        return int(feet_part.strip()) * 12 + int(inches_part.strip())
+    except Exception:
+        return np.nan
+
+
+def _parse_reach_inches(r):
+    if not isinstance(r, str) or r.strip() in ("--", ""):
+        return np.nan
+    try:
+        return float(r.replace('"', "").strip())
+    except Exception:
+        return np.nan
+
+
+@st.cache_data
+def build_reach_height_table(bio):
+    df = bio[["FIGHTER", "HEIGHT", "REACH"]].copy()
+    df["height_in"] = df["HEIGHT"].apply(_parse_height_inches)
+    df["reach_in"] = df["REACH"].apply(_parse_reach_inches)
+    df["reach_height_ratio"] = df["reach_in"] / df["height_in"]
+    return df.set_index("FIGHTER")[["height_in", "reach_in", "reach_height_ratio"]]
+
+
+# ------------------------------------------------------------
 # 데이터 로드
 # ------------------------------------------------------------
 @st.cache_data
@@ -381,6 +489,7 @@ def load_data():
 fights, bio, career = load_data()
 all_fighters = sorted(set(fights["fighter_1"]).union(set(fights["fighter_2"])))
 metrics = build_fighter_metrics(fights, career)
+reach_height = build_reach_height_table(bio)
 
 KOREAN_FIGHTERS = [
     {"name": "Dong Hyun Kim", "kor": "김동현", "nickname": "스턴건"},
@@ -538,6 +647,7 @@ elif page == "🥊 선수 비교":
 
                     st.metric("전적 (승-패)", f"{s['wins']}승 {s['losses']}패")
                     st.metric("승률", f"{s['win_rate']:.1f}%")
+                    render_recent_form(s["name"], fights)
 
                     bio_row = bio[bio["FIGHTER"] == s["name"]]
                     if not bio_row.empty:
@@ -592,6 +702,14 @@ elif page == "🥊 선수 비교":
             if low_sample:
                 names = ", ".join(n[0] for n in low_sample)
                 st.caption(f"참고: {names} 선수는 기록된 경기 수가 적어(3경기 미만) 참고용으로만 봐주세요.")
+
+            st.markdown("---")
+            twin_col1, twin_col2 = st.columns(2)
+            with twin_col1:
+                render_similar_fighters(fighter_a, metrics)
+            with twin_col2:
+                render_similar_fighters(fighter_b, metrics)
+
             render_radar_metric_guide()
 
     with tab3:
@@ -699,6 +817,36 @@ elif page == "📊 체급별 트렌드":
         st.plotly_chart(fig5, use_container_width=True)
         st.caption(f"{weight_class} 체급 경기에서 UFC 데이터 기준 가장 많은 승수를 기록한 선수 5명입니다.")
 
+    st.markdown(f"### {weight_class} 리치-신장 비율과 승률의 관계")
+    st.caption(
+        "리치(팔길이)가 신장 대비 긴 선수가 실제로 유리한지 살펴봅니다. 비율이 1.0보다 크면 "
+        "신장보다 리치가 긴 선수, 작으면 짧은 선수입니다. (참고: Lucy Liu의 UFC 데이터 분석 글)"
+    )
+    division_all = fights[fights["weight_division"] == weight_class]
+    division_fighters = set(division_all["fighter_1"]).union(division_all["fighter_2"])
+    rh_scatter = reach_height[reach_height.index.isin(division_fighters)].dropna(subset=["reach_height_ratio"])
+    rh_scatter = rh_scatter.join(metrics[["win_rate", "fights_recorded"]], how="inner")
+    rh_scatter = rh_scatter[rh_scatter["fights_recorded"] >= 3].dropna(subset=["win_rate"])
+    rh_scatter = rh_scatter.reset_index().rename(columns={"FIGHTER": "선수"})
+
+    if len(rh_scatter) < 5:
+        st.write("이 체급은 리치·신장 데이터가 충분하지 않아 분석을 표시할 수 없습니다.")
+    else:
+        fig7 = px.scatter(
+            rh_scatter, x="reach_height_ratio", y="win_rate", hover_name="선수",
+            labels={"reach_height_ratio": "리치/신장 비율", "win_rate": "승률(%)"},
+            color_discrete_sequence=[FIGHTER_COLORS[0]],
+        )
+        fig7.add_vline(x=1.0, line_dash="dash", line_color=CHART_AXIS)
+        fig7 = style_chart(fig7)
+        st.plotly_chart(fig7, use_container_width=True)
+        st.caption(
+            "점선은 리치와 신장이 같은 지점(비율 1.0)입니다. 점이 오른쪽으로 갈수록 리치가 긴 "
+            "선수, 위로 갈수록 승률이 높은 선수입니다. 뚜렷한 우상향 경향이 보이지 않는다면, 이 "
+            "체급에서는 리치보다 다른 요인(기술 · 체력 등)이 승패에 더 크게 작용한다고 읽을 수 "
+            "있습니다. 상관관계일 뿐 인과관계는 아니라는 점에 유의하세요."
+        )
+
 # ==============================================================
 # 화면 4. 한국 파이터
 # ==============================================================
@@ -727,6 +875,7 @@ elif page == "🇰🇷 한국 파이터":
                 wins = (fights["winner"] == name).sum()
                 losses = (fights["loser"] == name).sum()
                 st.metric("전적 (승-패)", f"{wins}승 {losses}패")
+                render_recent_form(name, fights)
 
                 career_row = career[career["FIGHTER"] == name]
                 if not career_row.empty:
@@ -751,6 +900,13 @@ elif page == "🇰🇷 한국 파이터":
         render_radar_metric_guide()
     else:
         st.write("레이더 차트를 그릴 만큼 상세 통계가 있는 선수가 부족합니다.")
+
+    st.markdown("### 세계 무대에서 닮은꼴 선수 찾기")
+    st.caption("한국 파이터 세 명 각각과 스타일이 가장 비슷한 UFC 소속 선수를 데이터로 찾아봤습니다.")
+    twin_cols = st.columns(3)
+    for col, fighter in zip(twin_cols, KOREAN_FIGHTERS):
+        with col:
+            render_similar_fighters(fighter["name"], metrics, top_n=2)
 
     st.caption("선수 사진 출처: Wikipedia")
 
