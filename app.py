@@ -463,6 +463,49 @@ def _parse_reach_inches(r):
         return np.nan
 
 
+# ------------------------------------------------------------
+# 커리어 흐름 — 코너 맥그리거처럼 전성기와 하락기가 있는 선수를 시계열로 보면
+# 스탯 평균만으로는 안 보이는 "지금 상승세인지 하락세인지"가 드러남
+# ------------------------------------------------------------
+def career_timeline(name, fights_df, window=5):
+    wins = fights_df[(fights_df["winner"] == name) & (fights_df["result_type"] == "승패")][["DATE"]].copy()
+    wins["result"] = 1
+    losses = fights_df[(fights_df["loser"] == name) & (fights_df["result_type"] == "승패")][["DATE"]].copy()
+    losses["result"] = 0
+    combined = pd.concat([wins, losses]).dropna(subset=["DATE"]).sort_values("DATE").reset_index(drop=True)
+    if combined.empty:
+        return None
+    combined["match_no"] = range(1, len(combined) + 1)
+    combined["rolling_win_rate"] = combined["result"].rolling(window=window, min_periods=1).mean() * 100
+    return combined
+
+
+def render_career_timeline(fighter_a, fighter_b, fights_df, window=5):
+    st.caption(
+        f"각 선수의 UFC 커리어를 경기 순서대로 놓고, 매 시점 직전 {window}경기 승률을 선으로 "
+        "그렸습니다. 선이 올라가면 상승세, 내려가면 하락세라는 뜻입니다. 두 선수의 커리어 길이가 "
+        "다르므로 x축은 날짜가 아니라 '커리어 내 몇 번째 경기인지'로 맞췄습니다."
+    )
+    frames = []
+    for name in [fighter_a, fighter_b]:
+        tl = career_timeline(name, fights_df, window=window)
+        if tl is not None:
+            tl = tl.copy()
+            tl["선수"] = name
+            frames.append(tl)
+    if not frames:
+        st.write("표시할 경기 기록이 없습니다.")
+        return
+    combined = pd.concat(frames)
+    fig8 = px.line(
+        combined, x="match_no", y="rolling_win_rate", color="선수", markers=True,
+        color_discrete_map={fighter_a: FIGHTER_COLORS[0], fighter_b: FIGHTER_COLORS[1]},
+        labels={"match_no": "경기 순번(커리어 내)", "rolling_win_rate": f"직전 {window}경기 승률(%)"},
+    )
+    fig8 = style_chart(fig8)
+    st.plotly_chart(fig8, use_container_width=True)
+
+
 @st.cache_data
 def build_reach_height_table(bio):
     df = bio[["FIGHTER", "HEIGHT", "REACH"]].copy()
@@ -630,7 +673,7 @@ elif page == "🥊 선수 비교":
     a = fighter_record(fighter_a)
     b = fighter_record(fighter_b)
 
-    tab1, tab2, tab3 = st.tabs(["전적 · 스탯", "스타일 레이더", "맞대결 · 하이라이트"])
+    tab1, tab2, tab3, tab4 = st.tabs(["전적 · 스탯", "스타일 레이더", "맞대결 · 하이라이트", "커리어 흐름"])
 
     with tab1:
         col1, col2 = st.columns(2)
@@ -730,6 +773,9 @@ elif page == "🥊 선수 비교":
             st.write("두 선수는 UFC에서 맞붙은 기록이 없습니다.")
         else:
             st.dataframe(h2h[["DATE", "EVENT", "winner", "loser", "METHOD", "weightclass"]])
+
+    with tab4:
+        render_career_timeline(fighter_a, fighter_b, fights)
 
     st.caption("선수 사진 출처: Wikipedia (해당 선수 문서가 없거나 사진이 없으면 이니셜 아바타로 대체됩니다.)")
 
