@@ -61,6 +61,24 @@ st.markdown(
     .stTabs [data-baseweb="tab-list"] { gap: 4px; }
     h2, h3 { margin-top: 0.9em; letter-spacing: 0.01em; }
     section[data-testid="stSidebar"] .stRadio label { font-size: 0.95rem; }
+    .stButton > button {
+        border-radius: 10px;
+        border: 1px solid rgba(224,57,62,0.5);
+        background: transparent;
+        color: #ffffff;
+        font-weight: 600;
+        transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+    }
+    .stButton > button:hover {
+        background: rgba(224,57,62,0.15);
+        border-color: #e0393e;
+        color: #ffffff;
+        transform: translateY(-1px);
+    }
+    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
+        border-radius: 10px !important;
+        border-color: rgba(255,255,255,0.15) !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -100,6 +118,19 @@ CHART_TEMPLATE = dict(
     legend=dict(bgcolor="rgba(0,0,0,0)"),
     margin=dict(t=30, b=10, l=10, r=10),
 )
+
+
+def section_header(text, color=None):
+    """일반 마크다운 헤더 대신 쓰는, 왼쪽에 색 막대가 붙은 섹션 제목 — 카드의 색 막대와
+    같은 디자인 언어를 페이지 전체에 반복해서 시각적으로 하나의 제품처럼 보이게 함."""
+    bar_color = color or ACCENT_RED
+    st.markdown(
+        f'<div style="display:flex;align-items:center;gap:10px;margin:1.3em 0 0.7em 0;">'
+        f'<div style="width:4px;height:22px;border-radius:2px;background:{bar_color};flex-shrink:0;"></div>'
+        f'<div style="font-size:1.3rem;font-weight:800;color:#ffffff;">{text}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def style_badge_html(label):
@@ -619,7 +650,7 @@ if page == "🏠 소개":
     col2.metric("등장 선수 수", f"{len(all_fighters):,}명")
     col3.metric("데이터 기간", f"{int(fights['year'].min())}~{int(fights['year'].max())}")
 
-    st.markdown("### 이 사이트로 할 수 있는 것")
+    section_header("이 사이트로 할 수 있는 것")
     preview_cards = [
         {
             "target": "🥊 선수 비교",
@@ -662,25 +693,27 @@ if page == "🏠 소개":
         preview_vals_a, _ = radar_values("Islam Makhachev", metrics)
         preview_vals_b, _ = radar_values("Conor McGregor", metrics)
         if preview_vals_a is not None and preview_vals_b is not None:
-            st.markdown("### 미리보기 — 스타일이 정반대인 두 선수를 겹쳐보면")
-            st.plotly_chart(
-                make_radar_chart([
-                    ("Islam Makhachev", preview_vals_a, FIGHTER_COLORS[0]),
-                    ("Conor McGregor", preview_vals_b, FIGHTER_COLORS[1]),
-                ]),
-                use_container_width=True,
-            )
-            st.caption(
-                "그래플러형 마카체프와 타격가형 맥그리거를 겹쳐보면 레이더 모양 자체가 다릅니다 — "
-                "'선수 비교' 화면에서 원하는 두 선수로 직접 그려볼 수 있습니다."
-            )
+            section_header("미리보기 — 스타일이 정반대인 두 선수를 겹쳐보면")
+            with st.container(border=True):
+                st.plotly_chart(
+                    make_radar_chart([
+                        ("Islam Makhachev", preview_vals_a, FIGHTER_COLORS[0]),
+                        ("Conor McGregor", preview_vals_b, FIGHTER_COLORS[1]),
+                    ]),
+                    use_container_width=True,
+                )
+                st.caption(
+                    "그래플러형 마카체프와 타격가형 맥그리거를 겹쳐보면 레이더 모양 자체가 다릅니다 — "
+                    "'선수 비교' 화면에서 원하는 두 선수로 직접 그려볼 수 있습니다."
+                )
 
-    st.markdown("### 전체 데이터 한눈에 보기")
-    method_counts = fights[fights["result_type"] == "승패"]["method_simple"].value_counts().reset_index()
-    method_counts.columns = ["방식", "횟수"]
-    fig = px.bar(method_counts, x="방식", y="횟수", color="방식", color_discrete_map=METHOD_COLORS)
-    fig = style_chart(fig)
-    st.plotly_chart(fig, use_container_width=True)
+    section_header("전체 데이터 한눈에 보기")
+    with st.container(border=True):
+        method_counts = fights[fights["result_type"] == "승패"]["method_simple"].value_counts().reset_index()
+        method_counts.columns = ["방식", "횟수"]
+        fig = px.bar(method_counts, x="방식", y="횟수", color="방식", color_discrete_map=METHOD_COLORS)
+        fig = style_chart(fig)
+        st.plotly_chart(fig, use_container_width=True)
 
 # ==============================================================
 # 화면 2. 선수 비교 (핵심 기능)
@@ -833,7 +866,7 @@ elif page == "📊 체급별 트렌드":
     top_winners.columns = ["선수", "승수"]
 
     if not top_winners.empty:
-        st.markdown(f"### {weight_class} 대표 선수")
+        section_header(f"{weight_class} 대표 선수")
         st.caption(f"{weight_class} 체급에서 가장 많은 승수를 기록한 선수들입니다. 얼굴과 스타일을 함께 확인해보세요.")
         top3 = top_winners.head(3)
         rep_cols = st.columns(len(top3))
@@ -848,14 +881,14 @@ elif page == "📊 체급별 트렌드":
                         st.markdown(style_badge_html(style["label"]), unsafe_allow_html=True)
                     st.caption(f"{weight_class} 체급 {int(row['승수'])}승")
 
-    st.markdown(f"### {weight_class} 승리 방식 분포")
+    section_header(f"{weight_class} 승리 방식 분포")
     method_counts = filtered["method_simple"].value_counts().reset_index()
     method_counts.columns = ["방식", "횟수"]
     fig3 = px.pie(method_counts, names="방식", values="횟수", color="방식", color_discrete_map=METHOD_COLORS)
     fig3 = style_chart(fig3)
     st.plotly_chart(fig3, use_container_width=True)
 
-    st.markdown(f"### {weight_class} 연도별 피니시 비율 변화")
+    section_header(f"{weight_class} 연도별 피니시 비율 변화")
     filtered = filtered.copy()
     filtered["is_finish"] = filtered["method_simple"].isin(["KO/TKO", "Submission"])
     yearly = filtered.groupby(filtered["year"].astype(int)).agg(
@@ -871,7 +904,7 @@ elif page == "📊 체급별 트렌드":
     st.plotly_chart(fig4, use_container_width=True)
     st.caption("판정까지 가지 않고 KO나 서브미션으로 끝난 경기 비율이 시대별로 어떻게 변했는지 보여줍니다.")
 
-    st.markdown(f"### {weight_class} 연도별 승리 방식 비중 변화 (타격 vs 그래플링)")
+    section_header(f"{weight_class} 연도별 승리 방식 비중 변화 (타격 vs 그래플링)")
     style_ct = pd.crosstab(filtered["year"].astype(int), filtered["method_simple"], normalize="index") * 100
     style_long = style_ct.reset_index().melt(id_vars="year", var_name="방식", value_name="비율")
     fig6 = px.line(
@@ -887,7 +920,7 @@ elif page == "📊 체급별 트렌드":
         "높다면, 그 체급은 최근 그래플링보다 타격/체력전 중심으로 흘러갔다고 읽을 수 있습니다."
     )
 
-    st.markdown(f"### {weight_class} 체급 내 최다승 TOP 5")
+    section_header(f"{weight_class} 체급 내 최다승 TOP 5")
     if top_winners.empty:
         st.write("표시할 데이터가 없습니다.")
     else:
@@ -899,7 +932,7 @@ elif page == "📊 체급별 트렌드":
         st.plotly_chart(fig5, use_container_width=True)
         st.caption(f"{weight_class} 체급 경기에서 UFC 데이터 기준 가장 많은 승수를 기록한 선수 5명입니다.")
 
-    st.markdown(f"### {weight_class} 리치-신장 비율과 승률의 관계")
+    section_header(f"{weight_class} 리치-신장 비율과 승률의 관계")
     st.caption(
         "리치(팔길이)가 신장 대비 긴 선수가 실제로 유리한지 살펴봅니다. 비율이 1.0보다 크면 "
         "신장보다 리치가 긴 선수, 작으면 짧은 선수입니다. (참고: Lucy Liu의 UFC 데이터 분석 글)"
@@ -970,7 +1003,7 @@ elif page == "🇰🇷 한국 파이터":
         if vals is not None:
             radar_entries.append((fighter["kor"], vals, color))
 
-    st.markdown("### 세 선수 스타일 레이더 비교")
+    section_header("세 선수 스타일 레이더 비교")
     if len(radar_entries) >= 2:
         st.plotly_chart(make_radar_chart(radar_entries), use_container_width=True)
         st.caption(
@@ -983,7 +1016,7 @@ elif page == "🇰🇷 한국 파이터":
     else:
         st.write("레이더 차트를 그릴 만큼 상세 통계가 있는 선수가 부족합니다.")
 
-    st.markdown("### 세계 무대에서 닮은꼴 선수 찾기")
+    section_header("세계 무대에서 닮은꼴 선수 찾기")
     st.caption("한국 파이터 세 명 각각과 스타일이 가장 비슷한 UFC 소속 선수를 데이터로 찾아봤습니다.")
     twin_cols = st.columns(3)
     for col, fighter in zip(twin_cols, KOREAN_FIGHTERS):
