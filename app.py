@@ -140,6 +140,22 @@ RADAR_LABELS = {
 }
 RADAR_KEYS = list(RADAR_LABELS.keys())
 
+# 레이더 차트를 처음 보는 사람도 각 지표가 뭘 뜻하는지 바로 이해할 수 있도록 짧은 설명 추가
+RADAR_METRIC_DESC = {
+    "sig_str_per_fight": "한 경기당 상대에게 적중시킨 유효타(스트라이크) 평균 횟수",
+    "sig_str_accuracy": "시도한 타격 중 실제로 맞춘 비율 — 높을수록 정교한 타격가",
+    "td_accuracy": "시도한 테이크다운(넘어뜨리기) 중 성공한 비율 — 높을수록 그래플링이 강함",
+    "ctrl_min_per_fight": "경기당 상대를 그라운드에서 제압하고 있었던 평균 시간(분)",
+    "sub_att_per_fight": "경기당 관절기 · 조르기 등 서브미션을 시도한 평균 횟수",
+    "win_rate": "전체 경기 중 실제로 이긴 경기의 비율",
+}
+
+
+def render_radar_metric_guide():
+    with st.expander("레이더 차트 지표가 무슨 뜻인지 보기"):
+        for key in RADAR_KEYS:
+            st.markdown(f"**{RADAR_LABELS[key]}** — {RADAR_METRIC_DESC[key]}")
+
 
 @st.cache_data
 def build_fighter_metrics(fights, career):
@@ -374,11 +390,19 @@ KOREAN_FIGHTERS = [
 
 # ------------------------------------------------------------
 # 사이드바 내비게이션
+# (소개 페이지의 미리보기 카드에서 버튼으로 바로 이동할 수 있도록 session_state로 관리)
 # ------------------------------------------------------------
-page = st.sidebar.radio(
-    "화면 선택",
-    ["🏠 소개", "🥊 선수 비교", "📊 체급별 트렌드", "🇰🇷 한국 파이터"],
-)
+NAV_OPTIONS = ["🏠 소개", "🥊 선수 비교", "📊 체급별 트렌드", "🇰🇷 한국 파이터"]
+if "nav_page" not in st.session_state:
+    st.session_state.nav_page = NAV_OPTIONS[0]
+
+page = st.sidebar.radio("화면 선택", NAV_OPTIONS, key="nav_page")
+
+
+def _set_nav_page(target_page):
+    # 버튼의 on_click 콜백 안에서만 session_state를 바꿀 수 있음
+    # (라디오 위젯이 이미 그려진 뒤 스크립트 본문에서 직접 바꾸면 StreamlitAPIException 발생)
+    st.session_state.nav_page = target_page
 
 st.sidebar.markdown("---")
 st.sidebar.caption(
@@ -394,20 +418,11 @@ if page == "🏠 소개":
 
     st.markdown(
         """
-        ### 왜 만들었나
         UFC 팬들 사이에서 "저 선수 진짜 세냐", "이번에 붙으면 누가 이길까" 논쟁은
         늘 하이라이트 영상 몇 개로 끝나버립니다. 하지만 UFC는 경기마다 유효타 수,
-        테이크다운 성공률, 컨트롤 타임까지 상세히 기록되는 스포츠입니다.
-        이 사이트는 그 기록을 근거로 **감이 아니라 데이터로** 선수를 비교하고,
-        체급 전체의 흐름까지 읽을 수 있게 만들었습니다.
-
-        ### 이 사이트로 할 수 있는 것
-        - 두 선수의 전적 · 승리 방식 · 타격/그래플링 스탯을 나란히 비교하고,
-          **레이더 차트**로 스타일 차이(타격형 vs 그래플러형)를 한눈에 확인
-        - 좋아하는 선수의 커리어 전체 패턴(어떻게 이기고 지는가) 확인
-        - 관심 체급이 최근 몇 년간 어떻게 바뀌었는지(피니시율 변화, 타격 vs 그래플링
-          승리 비중 변화 등) 트렌드로 파악
-        - 김동현 · 정찬성 · 최두호 등 **한국 파이터**들의 스타일을 데이터로 비교
+        테이크다운 성공률, 컨트롤 타임까지 상세히 기록되는 스포츠입니다. 이 사이트는
+        그 기록을 근거로 **감이 아니라 데이터로** 선수를 비교하고, 체급 전체의 흐름까지
+        읽을 수 있게 만들었습니다.
         """
     )
 
@@ -416,14 +431,68 @@ if page == "🏠 소개":
     col2.metric("등장 선수 수", f"{len(all_fighters):,}명")
     col3.metric("데이터 기간", f"{int(fights['year'].min())}~{int(fights['year'].max())}")
 
-    st.subheader("전체 승리 방식 분포")
+    st.markdown("### 이 사이트로 할 수 있는 것")
+    preview_cards = [
+        {
+            "target": "🥊 선수 비교",
+            "title": "선수 비교",
+            "desc": "두 선수의 전적 · 스탯을 나란히 놓고, 레이더 차트로 스타일 차이를 한눈에 봅니다.",
+            "color": FIGHTER_COLORS[0],
+        },
+        {
+            "target": "📊 체급별 트렌드",
+            "title": "체급별 트렌드",
+            "desc": "관심 체급이 최근 몇 년 사이 타격 중심으로 변했는지, 그래플링 중심으로 변했는지 추적합니다.",
+            "color": FIGHTER_COLORS[1],
+        },
+        {
+            "target": "🇰🇷 한국 파이터",
+            "title": "한국 파이터",
+            "desc": "김동현 · 정찬성 · 최두호, 세 선수의 스타일을 같은 레이더 위에 겹쳐서 비교합니다.",
+            "color": TRIO_COLORS[2],
+        },
+    ]
+    preview_cols = st.columns(3)
+    for col, card in zip(preview_cols, preview_cards):
+        with col:
+            with st.container(border=True):
+                st.markdown(
+                    f'<div style="width:36px;height:6px;border-radius:999px;'
+                    f'background:{card["color"]};margin-bottom:10px;"></div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(f"**{card['title']}**")
+                st.caption(card["desc"])
+                st.button(
+                    "바로가기",
+                    key=f"goto_{card['target']}",
+                    on_click=_set_nav_page,
+                    args=(card["target"],),
+                )
+
+    if "Islam Makhachev" in metrics.index and "Conor McGregor" in metrics.index:
+        preview_vals_a, _ = radar_values("Islam Makhachev", metrics)
+        preview_vals_b, _ = radar_values("Conor McGregor", metrics)
+        if preview_vals_a is not None and preview_vals_b is not None:
+            st.markdown("### 미리보기 — 스타일이 정반대인 두 선수를 겹쳐보면")
+            st.plotly_chart(
+                make_radar_chart([
+                    ("Islam Makhachev", preview_vals_a, FIGHTER_COLORS[0]),
+                    ("Conor McGregor", preview_vals_b, FIGHTER_COLORS[1]),
+                ]),
+                use_container_width=True,
+            )
+            st.caption(
+                "그래플러형 마카체프와 타격가형 맥그리거를 겹쳐보면 레이더 모양 자체가 다릅니다 — "
+                "'선수 비교' 화면에서 원하는 두 선수로 직접 그려볼 수 있습니다."
+            )
+
+    st.markdown("### 전체 데이터 한눈에 보기")
     method_counts = fights[fights["result_type"] == "승패"]["method_simple"].value_counts().reset_index()
     method_counts.columns = ["방식", "횟수"]
     fig = px.bar(method_counts, x="방식", y="횟수", color="방식", color_discrete_map=METHOD_COLORS)
     fig = style_chart(fig)
     st.plotly_chart(fig, use_container_width=True)
-
-    st.info("왼쪽 사이드바에서 '선수 비교' 또는 '체급별 트렌드' 화면으로 이동해보세요 →")
 
 # ==============================================================
 # 화면 2. 선수 비교 (핵심 기능)
@@ -523,6 +592,7 @@ elif page == "🥊 선수 비교":
             if low_sample:
                 names = ", ".join(n[0] for n in low_sample)
                 st.caption(f"참고: {names} 선수는 기록된 경기 수가 적어(3경기 미만) 참고용으로만 봐주세요.")
+            render_radar_metric_guide()
 
     with tab3:
         st.markdown("##### 매치업 하이라이트")
@@ -558,6 +628,25 @@ elif page == "📊 체급별 트렌드":
     divisions = [d for d in fights["weight_division"].dropna().unique() if d != "기타"]
     weight_class = st.selectbox("체급 선택", sorted(divisions))
     filtered = fights[(fights["weight_division"] == weight_class) & (fights["result_type"] == "승패")].dropna(subset=["year"])
+
+    top_winners = filtered["winner"].value_counts().head(5).reset_index()
+    top_winners.columns = ["선수", "승수"]
+
+    if not top_winners.empty:
+        st.markdown(f"### {weight_class} 대표 선수")
+        st.caption(f"{weight_class} 체급에서 가장 많은 승수를 기록한 선수들입니다. 얼굴과 스타일을 함께 확인해보세요.")
+        top3 = top_winners.head(3)
+        rep_cols = st.columns(len(top3))
+        for col, (_, row) in zip(rep_cols, top3.iterrows()):
+            fighter_name = row["선수"]
+            with col:
+                with st.container(border=True):
+                    st.markdown(render_avatar(fighter_name, FIGHTER_COLORS[0], size=80), unsafe_allow_html=True)
+                    st.markdown(f"**{fighter_name}**")
+                    style = classify_style(fighter_name, metrics)
+                    if style:
+                        st.markdown(style_badge_html(style["label"]), unsafe_allow_html=True)
+                    st.caption(f"{weight_class} 체급 {int(row['승수'])}승")
 
     st.markdown(f"### {weight_class} 승리 방식 분포")
     method_counts = filtered["method_simple"].value_counts().reset_index()
@@ -599,8 +688,6 @@ elif page == "📊 체급별 트렌드":
     )
 
     st.markdown(f"### {weight_class} 체급 내 최다승 TOP 5")
-    top_winners = filtered["winner"].value_counts().head(5).reset_index()
-    top_winners.columns = ["선수", "승수"]
     if top_winners.empty:
         st.write("표시할 데이터가 없습니다.")
     else:
@@ -661,6 +748,7 @@ elif page == "🇰🇷 한국 파이터":
             "선수 대비 백분위로 평균 낸 값)를 비교해 자동으로 계산한 것입니다. 세 선수의 레이더 "
             "모양이 서로 다르게 나온다면, 실제로 다른 스타일로 UFC에서 활동했다는 뜻입니다."
         )
+        render_radar_metric_guide()
     else:
         st.write("레이더 차트를 그릴 만큼 상세 통계가 있는 선수가 부족합니다.")
 
