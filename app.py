@@ -303,39 +303,49 @@ WIKI_HEADERS = {"User-Agent": "PlayLabAcademy-UFC-App/1.0 (educational project)"
 
 
 def _wiki_summary_thumbnail(lang, title):
-    try:
-        resp = requests.get(
-            f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{quote(title)}",
-            headers=WIKI_HEADERS, timeout=3,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("type") == "disambiguation":
-                return None
-            return (data.get("thumbnail") or {}).get("source")
-    except Exception:
-        pass
+    # 클라우드 배포 환경은 네트워크가 가끔 느리거나 한 번씩 끊기는 경우가 있어서,
+    # 타임아웃을 넉넉히 주고 한 번 실패하면 바로 포기하지 않고 한 번 더 시도한다.
+    for attempt in range(2):
+        try:
+            resp = requests.get(
+                f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{quote(title)}",
+                headers=WIKI_HEADERS, timeout=6,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("type") == "disambiguation":
+                    return None
+                return (data.get("thumbnail") or {}).get("source")
+            return None
+        except Exception:
+            continue
     return None
 
 
 def _wikidata_image(qid):
-    try:
-        resp = requests.get(
-            f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
-            headers=WIKI_HEADERS, timeout=3,
-        )
-        if resp.status_code == 200:
-            entity = resp.json()["entities"][qid]
-            p18 = entity.get("claims", {}).get("P18")
-            if p18:
-                filename = p18[0]["mainsnak"]["datavalue"]["value"]
-                return f"https://commons.wikimedia.org/wiki/Special:FilePath/{quote(filename.replace(' ', '_'))}"
-    except Exception:
-        pass
+    for attempt in range(2):
+        try:
+            resp = requests.get(
+                f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
+                headers=WIKI_HEADERS, timeout=6,
+            )
+            if resp.status_code == 200:
+                entity = resp.json()["entities"][qid]
+                p18 = entity.get("claims", {}).get("P18")
+                if p18:
+                    filename = p18[0]["mainsnak"]["datavalue"]["value"]
+                    return f"https://commons.wikimedia.org/wiki/Special:FilePath/{quote(filename.replace(' ', '_'))}"
+                return None
+            return None
+        except Exception:
+            continue
     return None
 
 
-@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
+# 사진 조회가 한 번 실패해도(네트워크 순간 오류 등) 하루 종일 "사진없음"으로 굳어버리지
+# 않도록, 캐시 유지시간을 24시간이 아니라 30분으로 짧게 잡는다 — 조금 더 자주 재조회하는
+# 대신, 실패가 오래 남아있지 않고 금방 스스로 복구된다.
+@st.cache_data(show_spinner=False, ttl=60 * 30)
 def get_fighter_photo_url(name):
     title = WIKI_TITLE_OVERRIDES.get(name, name)
     candidates = [title, f"{title} (fighter)", f"{title} (mixed martial artist)", f"{title} (martial artist)"]
